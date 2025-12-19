@@ -1,0 +1,82 @@
+Assignment BioSB course Integrated Modelling and Optimisation
+
+Modelling chronic lymphocytic leukaemia cell kinetics
+Introduction
+The purpose of this assignment is to obtain some practical experience with the methods discussed within the course and which are related to the analysis of dynamic ODE models.  The exercises are based on a kinetic model of chronic lymphocytic leukaemia (Wodarz et al. 2014). 
+
+Chronic lymphocytic leukaemia (CLL) is the most common form of leukaemia in adults in Western countries. With this disease malignant B-cells start to accumulate and proliferate in the lymph nodes and the spleen. Treatments based on molecularly targeted therapy show increase of the survival rate in high-risk patients.  In particular, the inhibitor Ibrutinib has been found to be an effective targeted therapy normalizing B-cell counts by decreasing B-cell–receptor signalling (Burger et al. 2015). This results in an increased effective death rate of B-cells and a redistribution of the B-cells from the lymph nodes, spleen, and bone marrow to the blood.
+To evaluate treatment outcome lymphocyte concentrations are measured in blood. With predictive modelling the expected CLL kinetics and therefore treatment outcome can be evaluated of patients taking Ibrutinib. Among the main goals such a model is predicting a patient specific CLL kinetics based on only a small number of measurements or on the patient specific disease characteristics only. 
+
+CLL cells derive from B-cells which originate and mature within the bone marrow. For patients with CLL the lymph nodes and spleen are enlarged due to accumulation and proliferation of these malignant lymphocytes, which redistribute from the lymphoid tissues to the blood. The disease can be tackled by targeting the Bruton’s tyrosine kinase (BTK) which is part of the B-cell receptor (BCR) signalling cascade. The inhibitor Ibrutinib decreases BCR signalling by inhibiting the BTK and influences CLL kinetics. Specifically, Ibrutinib inhibits lymphocytic proliferation and restores the distribution of CLL cells to the blood. Accordingly, the CLL cells die both in tissue and blood, making the tissues shrink. After the treatment start this is often observed as lymphocytosis.  
+
+Messmer et al. (2005) suggest the usage of a two-compartment model to describe CLL kinetics in tissue and blood. The two compartments exist of (i) the peripheral blood and (ii) the lymphoid tissue, including lymph nodes and the spleen, as described in Figure 1. Subsequently, Wodarz et al. (2014) used this model to describe the CLL cell redistribution and death induced by Ibrutinib by evaluating absolute lymphocyte counts in the total blood and tissue volume (ALC). 
+
+In this exercise we implement and analyse the model by Wodarz et al. (2014) focusing on the estimation of parameters and their profiles. Additionally, we consider how the extraction of parameters from real data can be improved by specific study design. The insights on the sampling strategies, i.e., the times of data acquisition, can be used to improve the data acquisition process. Additionally, the quality of existing datasets can be evaluated (Wodarz et al. 2014; Burger et al. 2017) and datasets of high quality can be constructed. 
+ 
+Figure 1. Schematic overview of the CLL kinetics as described by Messmer et al. (2005). The model consists of two compartments, tissue and blood, and three parameters: The death rates for the lymphocytes in tissue and blood are denoted by d_1and d_2, respectively. The redistribution rate is denoted by m.
+Mathematical model
+We use the two-compartment model proposed in (Messmer et al. 2005) and (Wodarz et al. 2014) as schematically shown in Figure 1. The model describes the time development of the absolute lymphocyte counts (ALC) within the tissue, x, and in the blood, y. The kinetics covers the lymphocytic death rates and the redistribution from tissue to blood.  
+dx/dt= -mx-d_1 (x-c)					(1)
+dy/dt= mx-d_2 y						(2)
+
+with x(0)=x_0 and 〖y(0)=y〗_0 for the initial ALC in tissue and blood.
+Parameter d_1 describes the death rate in the tissue, parameter m the redistribution from tissue to blood and d_2 the death rate in the blood. Parameter c is added to account for the observation that lymphocytes in the tissue do not reach complete clearance. Therefore d_1*c represents a constant inflow of lymphocytes to the tissue (Wodarz et al. 2014). 
+
+Closed analytical solution (optional)
+As the system is quite simple, the closed analytical solution can be obtained. The obtained functions can be used to facilitate the simulation of the system’s solution and generation of the datasets, as mentioned later in the text. 
+
+Computer model
+Implement the model using the built-in solvers, e.g., Matalb’s ode45 and ode15s, and show simulations for some chosen values of the parameters. It would be interesting to simulate at least two classes of patients with a slow and fast response. This difference can be implemented by taking a ten times lower value for d_2 for the slower response (d_2 = 0.002) compared to the faster response (d_2 = 0.02).  
+Plot the behaviour of the simulated models.
+Parameter boundaries
+Parameter boundaries need to be defined for the parameter optimization and for sampling the starting points. The model’s parameter boundaries can be divided in two groups: (i) the parameter boundaries for x_0, y_0 and c which can partly be derived from the data and (ii) the parameter boundaries for d_1, d_2 and m that are to be derived from literature and prior experiments. For x_0 and y_0 a 25% range around the first known data point is used. For c the value of x(0) is used as an upper bound. The boundaries for the other parameters are based on the ranges from the literature. The used parameter boundaries are shown in Table 1.
+
+Parameter	d_2  [d-1]	d_1  [d-1]	m  [d-1]	x0  [-]	y0  [-]	c  [-]
+Lower bound	1*10-4	1*10-4	5*10-5	0.75*x(0)
+1*109	0.75*y(0)	1*105
+Upper bound	0.1	0.1	0.5	1.25*x(0)
+1*1013	1.25*y(0)	x(0)
+
+Table 1. Parameter boundaries used for optimization. For x0 two values are given as without a data sample in x no information exists on x(0). d^(-1) stands for “per day”, “-” are absolute lymphocyte counts.
+
+Steady state values
+Compute the steady state values of the system with the computer and/or analytical model. Check the stability of the steady state values.
+Data simulation (optional)
+For the parameter analysis in the subsequent sections you can use the provided datasets. Alternatively, the data for the parameter inference is generated by simulating measurements. For this purpose, we first simulate ALC with the computer or the analytical model. An example of simulated data is given in Figure 2. One patient with slower lymphocytosis occurrence and one patient with faster lymphocytosis occurrence are simulated based on the parameters found by (Wodarz et al. 2014). For the faster response lymphocytosis is observed after a few weeks, whereas for the slower response this is observed after a few months (J. C. Byrd et al. 2013). 
+
+
+
+Figure 2. Data simulation for a slower and faster lymphocytosis response. (A, B) The simulated absolute lymphocyte counts in the total volume of the tissue (A) and blood (B) for a slower (light-grey continuous line) and a faster (dark-grey continuous line) lymphocytosis response are simulated using the system described in eq. 3 and 4. The dashed lines in both graphs show one standard deviation from the model fit based on the true parameters. The sampling strategy from Burger et al. (2017) with one tissue measurement and seventeen blood measurements is represented in black at the bottom of the graphs.
+Parameter inference
+To perform parameter inference the provided dataset1 and dataset2 can be used or self-generated data. Estimate with which parameter values the given data set have been calculated. Combine a global search (e.g., Controlled Random Search) with a local search (e.g., lsqnonlin).  Give the resulting parameter values as well as a short description of how they were obtained, i.e., by discussing the different (mathematical) steps you took in the optimization process. 
+
+Identifiability analysis
+Structural identifiability (optional)
+The system we work with is rather small, so it is possible to manually estimate the structural identifiability. You can also try to apply some of the methods that will be presented during Day 4 and Day 5 of the course.
+
+Practical identifiability
+Produce the parameter covariance matrix. 
+Study design (optional)
+To get a more general view on the influence of the sampling strategy on the parameter inference multiple datasets can be simulated. To evaluate the parameter inference we look at the discrepancy between the model fit for the true parameters and the inferred parameters. Create for this purpose simulated datasets with noise. For every tested sampling strategy create at least two data sets, both for a slower and faster lymphocytosis responses, 
+
+The general concept of analysing the model discrepancy for different sampling strategies is shown in Figure 3. Every single model fit is evaluated using the sum of squared errors (SSE) calculated on the first 500 days between the simulated model fit for the true parameters and the inferred parameters,
+		
+The SSE is calculated on the data in linear space after normalization. 
+
+The evaluation of the parameter inference is done for different sampling strategies.  Probably the simplest sampling strategy is to acquire data points with uniform distribution over time, i.e., with equal time intervals. Another sampling strategy, which takes into account the system dynamics, is based on Burger et al. (2017). A blood sample is drawn every two weeks for approximately the first 14 weeks and every month afterwards till a year after treatment start. Additionally, Burger et al. (2017) uses one CT-scan volumetric analysis at treatment start to evaluate the ALC in the tissue. This sampling strategy is shown in Figure 2.
+
+One can choose different variations. For instance, we can look at the effect of doubling the amount of blood measurements in the first fourteen weeks, measuring weekly.
+
+Figure 3. Concept figure of the study design. (A, B) The simulated absolute lymphocyte counts in the total volume of the tissue (A) and blood (B) for the true parameters and inferred parameters. The parameter inference is performed for different sampling strategies with simulated measurements derived from the true parameters to which noise is added as described in Figure 2. The discrepancy between the model fit for the true parameters and inferred parameters is denoted with slashes. 
+
+
+
+Acknowledgments
+This assignment is based on a larger project originally developed together with Maartje Hoogeveen, Eindhoven University of Technology, and Carsten Marr and Melanie Schultz from the Institute of Computational Biology, Helmholtz Center Munich. In the assignment description, material is used from the project report by Maartje Hoogeveen.
+
+
+References
+
+Burger, Jan A., Kelvin W. Li, Michael J. Keating, Mariela Sivina, Ahmed M. Amer, Naveen Garg, Alessandra Ferrajoli, et al. 2017. “Leukemia Cell Proliferation and Death in Chronic Lymphocytic Leukemia Patients on Therapy with the BTK Inhibitor Ibrutinib.” JCI Insight 2 (2): e89904.
+Messmer, Bradley T., Davorka Messmer, Steven L. Allen, Jonathan E. Kolitz, Prasad Kudalkar, Denise Cesar, Elizabeth J. Murphy, et al. 2005. “In Vivo Measurements Document the Dynamic Cellular Kinetics of Chronic Lymphocytic Leukemia B Cells.” The Journal of Clinical Investigation 115 (3): 755–64.
+Wodarz, Dominik, Naveen Garg, Natalia L. Komarova, Ohad Benjamini, Michael J. Keating, William G. Wierda, Hagop Kantarjian, Danelle James, Susan O’Brien, and Jan A. Burger. 2014. “Kinetics of CLL Cells in Tissues and Blood during Therapy with the BTK Inhibitor Ibrutinib.” Blood, The Journal of the American Society of Hematology 123 (26): 4132–35.
