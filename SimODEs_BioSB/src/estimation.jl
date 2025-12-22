@@ -1,19 +1,8 @@
-"""
-    merge_parameters(base::NamedTuple, updates::NamedTuple) -> NamedTuple
-
-    Merge parameter updates into base parameters, preserving order and non-updated values.
-"""
-function merge_parameters(base::NamedTuple, updates::NamedTuple)::NamedTuple
-    # Validate that all update keys exist in base
-    update_keys = keys(updates)
-    all(k -> k in keys(base), update_keys) || 
-        throw(ArgumentError("All update keys must exist in base parameters. " *
-                          "Invalid keys: $(setdiff(update_keys, keys(base)))"))
-    
-    # Build new NamedTuple with same keys and order as base
-    new_vals = Tuple(get(updates, k, base[k]) for k in keys(base))
-    return NamedTuple{keys(base)}(new_vals)
-end
+using Statistics
+using Optimization, OptimizationOptimJL
+using Random
+using Sobol
+using QuasiMonteCarlo
 
 # ============================================================================
 # Functions regarding loss functions
@@ -272,6 +261,22 @@ end
 # ============================================================================
 # Helper functions for fit_model
 # ============================================================================
+"""
+    merge_parameters(base::NamedTuple, updates::NamedTuple) -> NamedTuple
+
+    Merge parameter updates into base parameters, preserving order and non-updated values.
+"""
+function merge_parameters(base::NamedTuple, updates::NamedTuple)::NamedTuple
+    # Validate that all update keys exist in base
+    update_keys = keys(updates)
+    all(k -> k in keys(base), update_keys) || 
+        throw(ArgumentError("All update keys must exist in base parameters. " *
+                          "Invalid keys: $(setdiff(update_keys, keys(base)))"))
+    
+    # Build new NamedTuple with same keys and order as base
+    new_vals = Tuple(get(updates, k, base[k]) for k in keys(base))
+    return NamedTuple{keys(base)}(new_vals)
+end
 
 _validate_param_names(model, params) = all(p -> p in keys(model.parameters), params) ||
     throw(ArgumentError("All parameters must exist in model.parameters"))

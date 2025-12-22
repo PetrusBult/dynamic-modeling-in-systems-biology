@@ -5,6 +5,7 @@ include("ode_models.jl")
 include("simulate.jl")
 include("data_loading.jl")
 include("plotting.jl")
+include("estimation.jl")
 
 # Export the abstract type
 export AbstractODEModel, WodartzModel
@@ -21,5 +22,7 @@ export load_cll_data
 # Export plotting functions
 export plot_cll
 
+# Export estimation functions
+export weighted_sse, create_loss_function, MultiStartConfig, fit_model, merge_parameters
 
 end # module SimODEs_BioSB
