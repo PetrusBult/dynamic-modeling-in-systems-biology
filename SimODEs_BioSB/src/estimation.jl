@@ -5,8 +5,9 @@ using Sobol
 using QuasiMonteCarlo
 
 # ============================================================================
-# Functions regarding loss functions
+# Stuff regarding loss functions
 # ============================================================================
+
 """
     weighted_sse(model::AbstractODEModel, 
                  params_to_estimate::NamedTuple,
@@ -127,6 +128,9 @@ function create_loss_function(model::AbstractODEModel,
     return loss
 end
 
+# ============================================================================
+# Parameter Estimation with Multi-Start & parallelization Support
+# ============================================================================
 
 """
     MultiStartConfig(; n_samples=100, n_starts=10, method=:sobol, parallel=true, seed=nothing)
@@ -169,10 +173,6 @@ Base.@kwdef struct MultiStartConfig
         new(n_samples, n_starts, method, parallel, seed)
     end
 end
-
-# ============================================================================
-# Parameter Estimation with Multi-Start & parallelization Support
-# ============================================================================
 
 """
     fit_model(model, observed_data, param_names; 
@@ -261,6 +261,7 @@ end
 # ============================================================================
 # Helper functions for fit_model
 # ============================================================================
+
 """
     merge_parameters(base::NamedTuple, updates::NamedTuple) -> NamedTuple
 
@@ -394,4 +395,268 @@ function _sobol_samples(n, lb, ub, n_params)
         samples[:, i] = lb .+ next!(s) .* (ub .- lb)
     end
     return samples
+end
+
+# ============================================================================
+# Controlled Random Search (CRS) Optimization
+# ============================================================================
+
+"""
+    CRSConfig(; n_population=150, n_simplex=nothing, rel_tol=0.05, 
+              max_iterations=10000, parallel=true, seed=nothing, verbose=false)
+
+Configuration for Controlled Random Search optimization.
+
+# Fields
+- `n_population::Int`: Size of parameter population (default: 150)
+- `n_simplex::Union{Int, Nothing}`: Simplex size for reflection (default: n_params + 1)
+- `rel_tol::Float64`: Relative convergence tolerance (default: 0.05)
+- `max_iterations::Int`: Maximum iterations (default: 10000)
+- `parallel::Bool`: Parallel loss evaluation (default: true)
+- `seed::Union{Int, Nothing}`: Random seed (default: nothing)
+- `verbose::Bool`: Print iteration info (default: false)
+
+# Example
+```julia
+config = CRSConfig(n_population=200, rel_tol=0.01, max_iterations=10000)
+fitted_model, result = fit_model_crs(model, obs_data, (:m, :d1, :d2, :c),
+                                     lb=[1e-5, 1e-5, 1e-5, 1e5],
+                                     ub=[0.5, 0.5, 0.5, 1e13],
+                                     config=config)
+```
+"""
+Base.@kwdef struct CRSConfig
+    n_population::Int = 150
+    n_simplex::Union{Int, Nothing} = nothing
+    rel_tol::Float64 = 0.05
+    max_iterations::Int = 10000
+    parallel::Bool = true
+    seed::Union{Int, Nothing} = nothing
+    verbose::Bool = false
+    
+    function CRSConfig(n_population, n_simplex, rel_tol, max_iterations, parallel, seed, verbose)
+        n_population > 0 || throw(ArgumentError("n_population must be positive"))
+        n_simplex !== nothing && n_simplex > 0 || n_simplex === nothing ||
+            throw(ArgumentError("n_simplex must be positive or nothing"))
+        rel_tol > 0 || throw(ArgumentError("rel_tol must be positive"))
+        max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+        new(n_population, n_simplex, rel_tol, max_iterations, parallel, seed, verbose)
+    end
+end
+
+"""
+    CRSResult
+
+Result from Controlled Random Search optimization.
+
+# Fields
+- `best_params::Vector{Float64}`: Best parameter vector found
+- `best_loss::Float64`: Loss at best parameters
+- `iterations::Int`: Number of iterations performed
+- `converged::Bool`: Whether convergence criterion was met
+- `rel_improvement::Float64`: Final relative improvement (max-min)/max
+"""
+struct CRSResult
+    best_params::Vector{Float64}
+    best_loss::Float64
+    iterations::Int
+    converged::Bool
+    rel_improvement::Float64
+end
+
+"""
+    _fit_crs(loss_fn, lb::Vector, ub::Vector, config::CRSConfig) -> CRSResult
+
+Core Controlled Random Search algorithm. 
+
+# Algorithm
+1. Generate random population in [lb, ub]
+2. Evaluate all losses
+3. Loop until convergence or max_iterations:
+   - Sample n_simplex random points
+   - Compute centroid of first n points
+   - Reflect last point: pNew = 2*centroid - last
+   - Clip to bounds
+   - If new loss better than worst, replace worst
+4. Return best parameters
+
+# Arguments
+- `loss_fn`: Loss function with signature loss(params::Vector, p) -> Float64
+- `lb::Vector`: Lower bounds for parameters
+- `ub::Vector`: Upper bounds for parameters
+- `config::CRSConfig`: Algorithm configuration
+
+# Returns
+- `CRSResult`: Optimization result with best parameters and convergence info
+"""
+function _fit_crs(loss_fn, lb::Vector, ub::Vector, config::CRSConfig)
+    n_params = length(lb)
+    n_simplex = config.n_simplex === nothing ? n_params + 1 : config.n_simplex
+    
+    n_simplex <= config.n_population || 
+        throw(ArgumentError("n_simplex ($n_simplex) must be <= n_population ($(config.n_population))"))
+    
+    # Set random seed if provided
+    config.seed !== nothing && Random.seed!(config.seed)
+    
+    # Initialize population: columns are parameter vectors
+    population = _generate_samples(:uniform, config.n_population, lb, ub, n_params)
+    losses = _evaluate_samples(loss_fn, population, config.parallel)
+    
+    # Pre-allocate work arrays
+    simplex_indices = Vector{Int}(undef, n_simplex)
+    centroid = Vector{Float64}(undef, n_params)
+    p_new = Vector{Float64}(undef, n_params)
+    
+    # Main CRS loop
+    converged = false
+    final_iter = 0
+    
+    for iter in 1:config.max_iterations
+        final_iter = iter
+        # Find worst point
+        worst_idx = argmax(losses)
+        worst_loss = losses[worst_idx]
+        best_loss = minimum(losses)
+        
+        # Check convergence
+        rel_imp = (worst_loss - best_loss) / worst_loss
+        if rel_imp < config.rel_tol
+            converged = true
+            config.verbose && @info "CRS converged at iteration $iter" rel_improvement=rel_imp
+            break
+        end
+        
+        # Sample n_simplex random indices
+        rand!(simplex_indices, 1:config.n_population)
+        
+        # Compute centroid of first n-1 points (use @views for efficiency)
+        fill!(centroid, 0.0)
+        @inbounds for i in 1:(n_simplex-1)
+            idx = simplex_indices[i]
+            @simd for j in 1:n_params
+                centroid[j] += population[j, idx]
+            end
+        end
+        centroid ./= (n_simplex - 1)
+        
+        # Reflect last point: p_new = 2*centroid - p_last
+        last_idx = simplex_indices[n_simplex]
+        @inbounds @simd for j in 1:n_params
+            p_new[j] = 2 * centroid[j] - population[j, last_idx]
+        end
+        
+        # Clip to bounds (element-wise)
+        @inbounds for j in 1:n_params
+            p_new[j] = clamp(p_new[j], lb[j], ub[j])
+        end
+        
+        # Evaluate new point
+        new_loss = loss_fn(p_new, nothing)
+        
+        # Replace worst if better
+        if new_loss < worst_loss
+            @inbounds for j in 1:n_params
+                population[j, worst_idx] = p_new[j]
+            end
+            losses[worst_idx] = new_loss
+            
+            config.verbose && iter % 100 == 0 && 
+                @info "CRS iteration $iter" best_loss=minimum(losses) worst_loss=maximum(losses) rel_imp=rel_imp
+        end
+    end
+    
+    # Find best solution
+    best_idx = argmin(losses)
+    best_params = population[:, best_idx]
+    best_loss = losses[best_idx]
+    
+    return CRSResult(best_params, best_loss, final_iter, converged, 
+                     (maximum(losses) - best_loss) / maximum(losses))
+end
+
+"""
+    fit_model_crs(model, observed_data, param_names;
+                  lb, ub, tspan=nothing, config=CRSConfig(), loss_fn=nothing)
+
+Fit model parameters using Controlled Random Search (CRS) optimization.
+
+CRS is a global optimization algorithm that maintains a population of parameter sets
+and iteratively improves them through simplex-based reflections. It's particularly
+effective for problems with multiple local minima.
+
+# Arguments
+- `model::AbstractODEModel`: The ODE model to fit
+- `observed_data::Vector{ObservedData}`: Observed data for each variable
+- `param_names`: Parameters to estimate (Tuple or Vector of Symbols)
+
+# Keyword Arguments
+- `lb::Vector`: Lower bounds (required)
+- `ub::Vector`: Upper bounds (required)
+- `tspan::Union{Tuple, Nothing}`: Time span for simulation (default: auto from data)
+- `config::CRSConfig`: CRS configuration (default: CRSConfig())
+- `loss_fn::Union{Function, Nothing}`: Custom loss function (default: creates weighted SSE)
+
+# Returns
+- `(fitted_model, result)`: Updated model and CRSResult with optimization details
+
+# Examples
+```julia
+# Basic usage with default config
+fitted_model, result = fit_model_crs(
+    model, obs_data, (:m, :d1, :d2, :c),
+    lb=[1e-5, 1e-5, 1e-5, 1e5],
+    ub=[0.5, 0.5, 0.5, 1e13]
+)
+
+# Custom configuration
+config = CRSConfig(n_population=200, rel_tol=0.01, verbose=true, seed=42)
+fitted_model, result = fit_model_crs(
+    model, obs_data, (:m, :d1, :d2),
+    lb=[0.0, 0.0, 0.0], ub=[1.0, 1.0, 1.0],
+    config=config
+)
+
+# Check convergence
+println("Converged: \$(result.converged)")
+println("Best loss: \$(result.best_loss)")
+println("Iterations: \$(result.iterations)")
+```
+"""
+function fit_model_crs(model::AbstractODEModel,
+                      observed_data::Vector{ObservedData},
+                      param_names::Union{NTuple{N, Symbol}, Vector{Symbol}};
+                      lb::Union{Vector, Nothing}=nothing,
+                      ub::Union{Vector, Nothing}=nothing,
+                      tspan=nothing,
+                      config::CRSConfig=CRSConfig(),
+                      loss_fn::Union{Function, Nothing}=nothing) where N
+    
+    # Normalize and validate parameters
+    params = param_names isa Tuple ? param_names : Tuple(param_names)
+    _validate_param_names(model, params)
+    
+    # Validate bounds (required for CRS)
+    lb === nothing && throw(ArgumentError("CRS requires lower bounds (lb)"))
+    ub === nothing && throw(ArgumentError("CRS requires upper bounds (ub)"))
+    length(lb) == length(params) || throw(ArgumentError("lb length must match param_names"))
+    length(ub) == length(params) || throw(ArgumentError("ub length must match param_names"))
+    all(lb .<= ub) || throw(ArgumentError("lb must be <= ub element-wise"))
+    
+    # Convert to Float64 vectors
+    lb_vec = Vector{Float64}(lb)
+    ub_vec = Vector{Float64}(ub)
+    
+    # Create loss function if not provided
+    if loss_fn === nothing
+        loss_fn = create_loss_function(model, observed_data, params, tspan)
+    end
+    
+    # Run CRS optimization
+    crs_result = _fit_crs(loss_fn, lb_vec, ub_vec, config)
+    
+    # Build fitted model
+    fitted_model = _build_model(model, params, crs_result.best_params)
+    
+    return fitted_model, crs_result
 end

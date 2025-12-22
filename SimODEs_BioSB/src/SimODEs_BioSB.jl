@@ -23,6 +23,6 @@ export load_cll_data
 export plot_cll
 
 # Export estimation functions
-export weighted_sse, create_loss_function, MultiStartConfig, fit_model, merge_parameters
+export weighted_sse, create_loss_function, MultiStartConfig, fit_model, merge_parameters, fit_model_crs, CRSConfig
 
 end # module SimODEs_BioSB
